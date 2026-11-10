@@ -1,0 +1,51 @@
+version: 2
+
+models:
+  - name: fct_transactions
+    description: Current state of every transaction; hard-deleted rows removed.
+    meta: {owner: analytics-engineering, source_owner: core-payments, contains_pii: false}
+    columns:
+      - name: transaction_id
+        tests: [unique, not_null]
+      - name: merchant_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_merchant')
+              field: merchant_id
+      - name: channel
+        tests:
+          - accepted_values:
+              values: ['POS', 'IPG', 'QR']
+      - name: status
+        tests:
+          - accepted_values:
+              values: ['PENDING', 'SUCCESS', 'FAILED', 'REVERSED']
+      - name: amount
+        tests: [not_null]
+      - name: card_bin
+        meta: {sensitivity: internal}
+
+  - name: dim_merchant
+    description: Current version of every merchant.
+    meta: {owner: analytics-engineering, data_steward: risk-team, contains_pii: true}
+    columns:
+      - name: merchant_id
+        tests: [unique, not_null]
+      - name: risk_level
+        tests:
+          - accepted_values:
+              values: ['LOW', 'MEDIUM', 'HIGH']
+      - name: owner_national_id_hash
+        meta: {pii: true, treatment: salted_sha256}
+      - name: owner_mobile_masked
+        meta: {pii: true, treatment: masked_middle_digits}
+
+  - name: dim_merchant_scd2
+    description: SCD2 merchant history; one row per version.
+    meta: {owner: analytics-engineering, data_steward: risk-team, contains_pii: true}
+    columns:
+      - name: merchant_id
+        tests: [not_null]
+      - name: valid_from
+        tests: [not_null]

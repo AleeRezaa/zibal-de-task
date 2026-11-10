@@ -1,0 +1,30 @@
+version: 2
+
+models:
+  - name: rpt_daily_channel_status
+    description: Daily totals per channel and status (Tehran day). Cards 1 and 2.
+    meta: {owner: finance-analytics, contains_pii: false}
+    columns:
+      - name: txn_date
+        tests: [not_null]
+      - name: channel
+        tests:
+          - accepted_values:
+              values: ['POS', 'IPG', 'QR']
+      - name: status
+        tests:
+          - accepted_values:
+              values: ['PENDING', 'SUCCESS', 'FAILED', 'REVERSED']
+
+  - name: rpt_daily_merchant_sales
+    description: Successful sales per day and merchant, with risk level and province at transaction time. Cards 3, 4, 5.
+    meta: {owner: finance-analytics, contains_pii: false}
+    columns:
+      - name: merchant_id
+        tests: [not_null]
+      - name: risk_level_at_txn
+        tests:
+          - accepted_values:
+              values: ['LOW', 'MEDIUM', 'HIGH']
+      - name: province_at_txn
+        tests: [not_null]
