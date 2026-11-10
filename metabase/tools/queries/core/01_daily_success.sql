@@ -3,6 +3,6 @@ SELECT (created_at AT TIME ZONE 'Asia/Tehran')::date AS day,
        SUM(amount) AS success_amount
 FROM core.transactions
 WHERE status = 'SUCCESS'
-  AND created_at >= ((now() AT TIME ZONE 'Asia/Tehran')::date - 89) AT TIME ZONE 'Asia/Tehran'
+  AND created_at >= ((now() AT TIME ZONE 'Asia/Tehran')::date - 89)::timestamp AT TIME ZONE 'Asia/Tehran'
 GROUP BY 1
 ORDER BY 1
