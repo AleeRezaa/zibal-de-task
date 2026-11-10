@@ -1,0 +1,21 @@
+name: paymentyar
+version: "1.0.0"
+config-version: 2
+profile: paymentyar
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+
+vars:
+  report_tz: "Asia/Tehran"
+
+models:
+  paymentyar:
+    staging:
+      +schema: staging
+      +materialized: view
+    warehouse:
+      +schema: warehouse
+    reporting:
+      +schema: reporting
