@@ -40,7 +40,7 @@ FROM (
     FROM generate_series(1, 5000000) AS g
     CROSS JOIN LATERAL (
         SELECT random() + g*0 AS m, random() + g*0 AS c, random() + g*0 AS b, random() + g*0 AS s,
-               (round(10000 * power(5000, random() + g*0), -3))::bigint AS amount,   -- 10k .. 50M IRR
+               round((10000 * power(5000, random() + g*0))::numeric, -3)::bigint AS amount,   -- 10k .. 50M IRR
                now() - (random() + g*0) * interval '180 days'          AS ts
     ) AS v
 ) t
