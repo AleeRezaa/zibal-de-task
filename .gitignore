@@ -6,3 +6,4 @@ dbt/target/
 dbt/logs/
 dbt/dbt_packages/
 .DS_Store
+dbt/.user.yml

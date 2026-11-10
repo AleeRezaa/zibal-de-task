@@ -121,6 +121,7 @@ services:
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-admin}
       PII_HASH_SALT: ${PII_HASH_SALT:-change-me-in-real-life}
       DBT_RUN_INTERVAL_SECONDS: 60
+      DBT_SEND_ANONYMOUS_USAGE_STATS: "false"   # no telemetry, no dbt/.user.yml
     volumes:
       - ./dbt:/dbt          # edit models without rebuilding
     depends_on:
