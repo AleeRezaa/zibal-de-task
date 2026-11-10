@@ -1,0 +1,163 @@
+name: paymentyar
+
+services:
+  # ---------------------------------------------------------------- source
+  source-db:
+    image: postgres:16
+    command: >
+      postgres -c wal_level=logical -c max_wal_senders=10 -c max_replication_slots=10
+               -c shared_buffers=512MB -c max_wal_size=2GB
+    environment:
+      POSTGRES_DB: paymentyar
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports: ["5432:5432"]
+    volumes:
+      - ./source/init:/docker-entrypoint-initdb.d:ro
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:   # TCP check fails while init scripts run, so "healthy" = seeded
+      test: ["CMD-SHELL", "pg_isready -h localhost -U postgres -d paymentyar"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 300s
+    mem_limit: 2g
+
+  simulator:
+    build: ./simulator
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@source-db:5432/paymentyar
+      TXN_PER_SECOND: ${TXN_PER_SECOND:-20}
+      SCHEMA_CHANGE_AFTER_SECONDS: ${SCHEMA_CHANGE_AFTER_SECONDS:-600}
+    depends_on:
+      source-db: {condition: service_healthy}
+    restart: unless-stopped
+    mem_limit: 256m
+
+  # ---------------------------------------------------------------- CDC
+  kafka:
+    image: apache/kafka:3.7.1
+    user: root            # named volume is root-owned; acceptable for a local demo
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_HEAP_OPTS: -Xms512m -Xmx512m
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+    mem_limit: 1g
+
+  connect:
+    image: quay.io/debezium/connect:2.7.3.Final
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: paymentyar-connect
+      CONFIG_STORAGE_TOPIC: _connect_configs
+      OFFSET_STORAGE_TOPIC: _connect_offsets
+      STATUS_STORAGE_TOPIC: _connect_status
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      HEAP_OPTS: -Xms512m -Xmx1g
+    ports: ["8083:8083"]
+    depends_on:
+      kafka: {condition: service_healthy}
+      source-db: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf localhost:8083/connectors > /dev/null"]
+      interval: 10s
+      retries: 30
+    mem_limit: 1536m
+
+  connect-init:
+    image: curlimages/curl:8.10.1
+    entrypoint: ["/bin/sh", "/cdc/register.sh"]
+    volumes:
+      - ./cdc:/cdc:ro
+    depends_on:
+      connect: {condition: service_healthy}
+    restart: on-failure
+
+  # ---------------------------------------------------------------- analytics
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    environment:
+      CLICKHOUSE_USER: admin
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-admin}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports: ["8123:8123", "9000:9000"]
+    volumes:
+      - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
+      - ch-data:/var/lib/clickhouse
+    ulimits:
+      nofile: {soft: 262144, hard: 262144}
+    depends_on:
+      kafka: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8123/ping"]
+      interval: 10s
+      retries: 30
+    mem_limit: 3g
+
+  dbt:
+    build: ./dbt
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_USER: admin
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-admin}
+      PII_HASH_SALT: ${PII_HASH_SALT:-change-me-in-real-life}
+      DBT_RUN_INTERVAL_SECONDS: 60
+    volumes:
+      - ./dbt:/dbt          # edit models without rebuilding
+    depends_on:
+      clickhouse: {condition: service_healthy}
+    restart: unless-stopped
+    mem_limit: 1g
+
+  # ---------------------------------------------------------------- BI
+  metabase:
+    build: ./metabase
+    environment:
+      MB_DB_FILE: /metabase-data/metabase.db   # H2 app DB; Postgres in production
+      JAVA_OPTS: -Xmx1536m
+      MB_ANON_TRACKING_ENABLED: "false"
+    ports: ["3000:3000"]
+    volumes:
+      - mb-data:/metabase-data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/api/health"]
+      interval: 15s
+      retries: 40
+    mem_limit: 2g
+
+  metabase-setup:
+    build: ./metabase/tools
+    environment:
+      MB_URL: http://metabase:3000
+      MB_ADMIN_EMAIL: ${MB_ADMIN_EMAIL:-admin@paymentyar.local}
+      MB_ADMIN_PASSWORD: ${MB_ADMIN_PASSWORD:-Paymentyar123!}
+    volumes:
+      - ./docs:/out
+    depends_on:
+      metabase: {condition: service_healthy}
+    restart: on-failure
+
+volumes:
+  pg-data:
+  kafka-data:
+  ch-data:
+  mb-data:
