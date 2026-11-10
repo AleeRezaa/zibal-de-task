@@ -8,6 +8,7 @@
 ) }}
 
 {% set tz = var('report_tz') %}
+-- depends_on: {{ ref('int_transactions') }}
 
 {% if is_incremental() %}
 with changed_days as (

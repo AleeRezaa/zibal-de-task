@@ -8,6 +8,8 @@
 ) }}
 
 {% set tz = var('report_tz') %}
+-- depends_on: {{ ref('int_transactions') }}
+-- depends_on: {{ ref('int_merchant_versions') }}
 
 with
 {% if is_incremental() %}
