@@ -1,4 +1,7 @@
-"""Creates the Metabase admin, database connections and the two dashboards."""
+"""Creates or updates the Metabase admin, database connections and the two dashboards.
+
+Re-running it is safe: existing cards get the latest SQL and chart settings.
+"""
 
 import os
 import pathlib
@@ -11,13 +14,36 @@ EMAIL = os.getenv("MB_ADMIN_EMAIL", "admin@paymentyar.local")
 PASSWORD = os.getenv("MB_ADMIN_PASSWORD", "Paymentyar123!")
 QUERIES = pathlib.Path(__file__).parent / "queries"
 
-# (file stem, card title, visualization)
+# (file stem, card title, visualization, chart settings)
 CARDS = [
-    ("01_daily_success", "1. Daily successful amount & count (90 days)", "line"),
-    ("02_success_rate_by_channel", "2. Daily success rate by channel (30 days)", "line"),
-    ("03_top_merchants_month", "3. Top 10 merchants, current month", "table"),
-    ("04_fee_by_mcc_province", "4. Fee by MCC and province (90 days)", "table"),
-    ("05_monthly_by_risk", "5. Monthly successful volume by risk level", "bar"),
+    (
+        "01_daily_success",
+        "1. Daily successful amount & count (90 days)",
+        "line",
+        {
+            "graph.dimensions": ["day"],
+            "graph.metrics": ["success_amount", "success_count"],
+            "series_settings": {"success_count": {"axis": "right"}},
+        },
+    ),
+    (
+        "02_success_rate_by_channel",
+        "2. Daily success rate by channel (30 days)",
+        "line",
+        {"graph.dimensions": ["day", "channel"], "graph.metrics": ["success_rate_pct"]},
+    ),
+    ("03_top_merchants_month", "3. Top 10 merchants, current month", "table", {}),
+    ("04_fee_by_mcc_province", "4. Fee by MCC and province (90 days)", "table", {}),
+    (
+        "05_monthly_by_risk",
+        "5. Monthly successful volume by risk level",
+        "bar",
+        {
+            "graph.dimensions": ["month", "risk_level"],
+            "graph.metrics": ["success_amount"],
+            "stackable.stack_type": "stacked",
+        },
+    ),
 ]
 DASHBOARDS = {"Daily Sales": "core", "Daily Sales (Optimized)": "reporting"}
 
@@ -66,23 +92,36 @@ def get_or_create_db(s, name, engine, details) -> int:
     return r.json()["id"]
 
 
-def get_or_create_dashboard(s, name, db_id, folder) -> int:
-    for d in s.get(f"{MB}/api/dashboard").json():
-        if d["name"] == name:
-            return d["id"]
+def card_body(db_id, folder, stem, title, display, viz) -> dict:
+    return {
+        "name": title,
+        "display": display,
+        "visualization_settings": viz,
+        "dataset_query": {
+            "type": "native",
+            "database": db_id,
+            "native": {"query": (QUERIES / folder / f"{stem}.sql").read_text()},
+        },
+    }
+
+
+def upsert_dashboard(s, name, db_id, folder) -> int:
+    existing = next((d for d in s.get(f"{MB}/api/dashboard").json() if d["name"] == name), None)
+
+    if existing:  # update SQL + chart settings of the cards already on it
+        detail = s.get(f"{MB}/api/dashboard/{existing['id']}").json()
+        card_ids = {dc["card"]["name"]: dc["card_id"] for dc in detail["dashcards"]}
+        for stem, title, display, viz in CARDS:
+            if title in card_ids:
+                s.put(
+                    f"{MB}/api/card/{card_ids[title]}", json=card_body(db_id, folder, stem, title, display, viz)
+                ).raise_for_status()
+        return existing["id"]
+
     dash_id = s.post(f"{MB}/api/dashboard", json={"name": name}).json()["id"]
     dashcards = []
-    for i, (stem, title, display) in enumerate(CARDS):
-        sql = (QUERIES / folder / f"{stem}.sql").read_text()
-        card = s.post(
-            f"{MB}/api/card",
-            json={
-                "name": title,
-                "display": display,
-                "visualization_settings": {},
-                "dataset_query": {"type": "native", "database": db_id, "native": {"query": sql}},
-            },
-        ).json()
+    for i, (stem, title, display, viz) in enumerate(CARDS):
+        card = s.post(f"{MB}/api/card", json=card_body(db_id, folder, stem, title, display, viz)).json()
         dashcards.append(
             {"id": -(i + 1), "card_id": card["id"], "row": (i // 2) * 6, "col": (i % 2) * 12, "size_x": 12, "size_y": 6}
         )
@@ -114,7 +153,7 @@ def main():
         ),
     }
     for name, folder in DASHBOARDS.items():
-        get_or_create_dashboard(s, name, db_ids[folder], folder)
+        upsert_dashboard(s, name, db_ids[folder], folder)
     print("Metabase ready: http://localhost:3000")
 
 

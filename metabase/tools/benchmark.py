@@ -72,7 +72,7 @@ def main():
         "| Card | Before cold (ms) | Before warm (ms) | After cold (ms) | After warm (ms) | Speed-up | Results |",
         "| --- | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
-    for _, title, _ in CARDS:
+    for _, title, *_ in CARDS:
         b_cold, b_warm, b_rows = measure(s, before[title])
         a_cold, a_warm, a_rows = measure(s, after[title])
         lines.append(
