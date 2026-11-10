@@ -15,7 +15,7 @@ select
     parseDateTime64BestEffort(JSONExtractString(row_json, 'created_at'), 6, 'UTC') as created_at,
     parseDateTime64BestEffort(JSONExtractString(row_json, 'updated_at'), 6, 'UTC') as updated_at,
     op,
-    toUInt8(op = 'd')                                                          as is_deleted,
+    CAST(op = 'd' AS UInt8)                                                          as is_deleted,
     source_lsn,
     source_ts,
     ingested_at

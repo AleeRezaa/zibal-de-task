@@ -13,7 +13,7 @@ select
     {{ mask_mobile("JSONExtractString(row_json, 'owner_mobile')") }}           as owner_mobile_masked,
     parseDateTime64BestEffort(JSONExtractString(row_json, 'updated_at'), 6, 'UTC') as updated_at,
     op,
-    toUInt8(op = 'd')                                                          as is_deleted,
+    CAST(op = 'd' AS UInt8)                                                          as is_deleted,
     source_lsn,
     source_ts,
     ingested_at
